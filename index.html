@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Муравьиная колония</title>
+    <style>
+        body {
+            margin: 0;
+            background: #2d1e0f;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: sans-serif;
+            color: #f0e6c5;
+        }
+        canvas {
+            background: #5b8c3e;
+            border: 3px solid #4a2c0f;
+            border-radius: 12px;
+            margin-top: 10px;
+        }
+        #ui {
+            margin: 10px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        button {
+            padding: 8px 16px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #b57e4a;
+            border: none;
+            color: white;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #8f5e2e;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <span>🍂 Еда в гнезде: <strong id="foodCounter">0</strong></span>
+        <button id="addAntBtn">➕ Добавить муравья</button>
+    </div>
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const foodCounterSpan = document.getElementById('foodCounter');
+
+        // --- Настройки ---
+        const W = canvas.width;
+        const H = canvas.height;
+
+        // Гнездо (муравейник)
+        const nest = {
+            x: W / 2,
+            y: H / 2,
+            radius: 35,
+        };
+
+        // Массивы объектов
+        let ants = [];
+        let foodItems = [];   // крошки еды на поле
+
+        // Общий счёт собранной еды
+        let totalFood = 0;
+
+        // --- Классы ---
+
+        class Ant {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.angle = Math.random() * Math.PI * 2; // направление
+                this.speed = 1.2 + Math.random() * 0.8;
+                this.state = 'wander'; // wander / seekFood / returnHome
+                this.targetFood = null; // ссылка на объект еды
+                this.carryingFood = false;
+                this.wanderTimer = 0;
+            }
+
+            // Расстояние до точки
+            distTo(px, py) {
+                const dx = this.x - px;
+                const dy = this.y - py;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+
+            // Расстояние до гнезда
+            distToNest() {
+                return this.distTo(nest.x, nest.y);
+            }
+
+            update(antsList, foodList) {
+                // Если несёт еду и уже в гнезде → сдать еду
+                if (this.carryingFood && this.distToNest() < nest.radius) {
+                    this.carryingFood = false;
+                    totalFood++;
+                    foodCounterSpan.textContent = totalFood;
+                    this.state = 'wander';
+                }
+
+                // Поведение в зависимости от состояния
+                if (this.state === 'wander') {
+                    this.wanderTimer--;
+                    if (this.wanderTimer <= 0) {
+                        this.angle += (Math.random() - 0.5) * 1.2; // плавный поворот
+                        this.wanderTimer = 20 + Math.floor(Math.random() * 40);
+                    }
+                    // Движение
+                    this.x += Math.cos(this.angle) * this.speed;
+                    this.y += Math.sin(this.angle) * this.speed;
+                    // Границы (отскок с поворотом)
+                    this.bounceOnEdges();
+
+                    // Проверка: видит ли еду?
+                    if (!this.carryingFood && foodList.length > 0) {
+                        for (let food of foodList) {
+                            const d = this.distTo(food.x, food.y);
+                            if (d < 70) { // радиус зрения
+                                this.state = 'seekFood';
+                                this.targetFood = food;
+                                break;
+                            }
+                        }
+                    }
+                } 
+                else if (this.state === 'seekFood' && this.targetFood) {
+                    // Идём к еде
+                    const food = this.targetFood;
+                    const dx = food.x - this.x;
+                    const dy = food.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 5) {
+                        // Достигли еды, подбираем
+                        this.carryingFood = true;
+                        // Удаляем еду с поля
+                        const index = foodList.indexOf(food);
+                        if (index > -1) foodList.splice(index, 1);
+                        this.targetFood = null;
+                        this.state = 'returnHome';
+                    } else {
+                        this.angle = Math.atan2(dy, dx);
+                        this.x += Math.cos(this.angle) * this.speed;
+                        this.y += Math.sin(this.angle) * this.speed;
+                    }
+                } 
+                else if (this.state === 'returnHome') {
+                    // Идём к гнезду
+                    const dx = nest.x - this.x;
+                    const dy = nest.y - this.y;
+                    this.angle = Math.atan2(dy, dx);
+                    this.x += Math.cos(this.angle) * this.speed;
+                    this.y += Math.sin(this.angle) * this.speed;
+                }
+
+                // Если потеряли цель (еду съели другие) — вернуться к блужданию
+                if (this.state === 'seekFood' && (!this.targetFood || !foodList.includes(this.targetFood))) {
+                    this.state = 'wander';
+                    this.targetFood = null;
+                }
+            }
+
+            bounceOnEdges() {
+                if (this.x < 10) { this.x = 10; this.angle = Math.PI - this.angle; }
+                if (this.x > W - 10) { this.x = W - 10; this.angle = Math.PI - this.angle; }
+                if (this.y < 10) { this.y = 10; this.angle = -this.angle; }
+                if (this.y > H - 10) { this.y = H - 10; this.angle = -this.angle; }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                // Тело муравья
+                ctx.fillStyle = '#2a1e0a';
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 6, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // Голова
+                ctx.beginPath();
+                ctx.arc(6, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+                // Лапки (упрощённо)
+                ctx.strokeStyle = '#1a1205';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(-3, -3); ctx.lineTo(-5, -6);
+                ctx.moveTo(-3, 3); ctx.lineTo(-5, 6);
+                ctx.moveTo(3, -3); ctx.lineTo(5, -6);
+                ctx.moveTo(3, 3); ctx.lineTo(5, 6);
+                ctx.stroke();
+
+                // Если несёт еду — рисуем шарик над головой
+                if (this.carryingFood) {
+                    ctx.fillStyle = '#f5c542';
+                    ctx.beginPath();
+                    ctx.arc(8, -2, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        // --- Создание начальных объектов ---
+        function init() {
+            // 10 муравьёв вокруг гнезда
+            for (let i = 0; i < 10; i++) {
+                let angle = Math.random() * Math.PI * 2;
+                let dist = nest.radius + Math.random() * 20;
+                let ax = nest.x + Math.cos(angle) * dist;
+                let ay = nest.y + Math.sin(angle) * dist;
+                ants.push(new Ant(ax, ay));
+            }
+            // Несколько случайных крошек на старте
+            for (let i = 0; i < 15; i++) {
+                foodItems.push({
+                    x: 50 + Math.random() * (W - 100),
+                    y: 50 + Math.random() * (H - 100),
+                    size: 4 + Math.random() * 3
+                });
+            }
+        }
+
+        // --- Отрисовка ---
+        function drawFood() {
+            for (let food of foodItems) {
+                ctx.fillStyle = '#f7d44a';
+                ctx.beginPath();
+                ctx.arc(food.x, food.y, food.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#b38b2a';
+                ctx.beginPath();
+                ctx.arc(food.x, food.y, food.size * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawNest() {
+            // Муравейник
+            ctx.fillStyle = '#5c3d1a';
+            ctx.beginPath();
+            ctx.arc(nest.x, nest.y, nest.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#3b260d';
+            ctx.beginPath();
+            ctx.arc(nest.x, nest.y, nest.radius * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+            // Вход
+            ctx.fillStyle = '#1a0f00';
+            ctx.beginPath();
+            ctx.arc(nest.x, nest.y, 8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function gameLoop() {
+            // Обновление
+            for (let ant of ants) {
+                ant.update(ants, foodItems);
+            }
+
+            // Отрисовка
+            ctx.clearRect(0, 0, W, H);
+            drawNest();
+            drawFood();
+            for (let ant of ants) {
+                ant.draw(ctx);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Управление: клик по полю = новая еда ---
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;   // масштабирование
+            const scaleY = canvas.height / rect.height;
+            const mouseX = (e.clientX - rect.left) * scaleX;
+            const mouseY = (e.clientY - rect.top) * scaleY;
+
+            // Не даём создавать еду внутри муравейника
+            const distToNest = Math.hypot(mouseX - nest.x, mouseY - nest.y);
+            if (distToNest > nest.radius + 10) {
+                foodItems.push({
+                    x: mouseX,
+                    y: mouseY,
+                    size: 4 + Math.random() * 3
+                });
+            }
+        });
+
+        // Кнопка "Добавить муравья"
+        document.getElementById('addAntBtn').addEventListener('click', () => {
+            // Появляется рядом с гнездом
+            let angle = Math.random() * Math.PI * 2;
+            let dist = nest.radius + 10;
+            let ax = nest.x + Math.cos(angle) * dist;
+            let ay = nest.y + Math.sin(angle) * dist;
+            ants.push(new Ant(ax, ay));
+        });
+
+        // Старт
+        init();
+        gameLoop();
+    </script>
+</body>
+</html>
